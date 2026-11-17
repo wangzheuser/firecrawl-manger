@@ -52,13 +52,17 @@ docker run -d \
   -p 8000:8000 \
   -v fcam_data:/app/data \
   --env-file .env \
-  guangshanshui/firecrawl-manager:latest
+  guangshanshui/firecrawl-manager:sha-89d5d65@sha256:e2227a350dbfd3330a9da48a57fad68a7f95bc72c4471fef3b34458be1eb59c6
 
 # 3. 访问服务
 # WebUI: http://localhost:8000/ui2/
 # API Docs: http://localhost:8000/docs
-# Health Check: http://localhost:8000/healthz
+# Liveness: http://localhost:8000/healthz
+# Readiness: http://localhost:8000/readyz
 ```
+
+> 镜像按 `tag@digest` 固定：tag 表达版本语义（`sha-89d5d65` 对应提交 89d5d65），digest 保证内容不可变。
+> 容器自带 `HEALTHCHECK`（默认探测 `/readyz`），也可用 `docker inspect --format '{{.State.Health.Status}}' fcam` 查看。
 
 ### 使用 Docker Compose
 
@@ -106,6 +110,28 @@ docker compose --profile prod up -d postgres redis fcam_api fcam_admin
 - 数据面（`/api/*`）: 对外暴露 `:8000`
 - 控制面（`/admin/*`）: 仅绑定 `127.0.0.1:8001`
 
+### 健康检查
+
+`docker-compose.yml` 已为每个服务声明 `healthcheck`，探测目标为 `/readyz`（校验 admin token / master key / 数据库就绪），参数：
+
+| 项 | 值 | 说明 |
+| --- | --- | --- |
+| `test` | `python -c "... /readyz"` | 镜像无 curl/wget，用标准库探测 |
+| `interval` | `30s` | 常规轮询间隔 |
+| `timeout` | `5s` | 单次探测超时 |
+| `retries` | `3` | 连续失败 3 次判定 unhealthy |
+| `start_period` | `40s` | 覆盖 `alembic upgrade head` + uvicorn 启动 |
+
+- 存活与就绪语义分开：`/healthz` 只表示进程存活，`/readyz` 表示可接业务（失败返回 503）。
+- `unhealthy` 不会自动重启容器（`restart` 策略只响应进程退出），需配合外部监控告警。
+- 控制面服务（`fcam_admin`，端口 8001）使用独立锚点探测 8001，避免探测错端口导致误报。
+
+```bash
+# 查看健康状态
+docker compose ps
+docker inspect --format '{{.State.Health.Status}}' fcam
+```
+
 ### 公开部署（仅数据面）
 
 适合对外提供 API 服务，隐藏管理界面。
@@ -120,8 +146,8 @@ docker compose --profile public up -d fcam_public
 
 推荐配置:
 - 使用 PostgreSQL（避免 SQLite 在 PVC 上的问题）
-- 固定版本 tag（避免 `latest` 漂移）
-- 配置健康检查（`/healthz`, `/readyz`）
+- 固定版本 tag（避免 `latest` 漂移），或直接按 `tag@digest` 固定
+- 配置健康检查：存活用 `/healthz`，就绪用 `/readyz`（镜像与 compose 均已内置 `/readyz` 探测）
 
 ## 配置说明
 

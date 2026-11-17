@@ -3,6 +3,28 @@
 > 目的：把"我做了什么/为什么这么做/验证结果/下一步"作为可追溯记录，避免语义与实现漂移。
 > 约束：不记录任何明文 token/api_key/Authorization；如需示例一律用占位符。
 
+## 2026-11-17（UTC）
+
+### 可复现发布：固定镜像版本 + 补齐健康检查
+
+**背景**
+- 生产部署（us 服务器 `/opt/docker_projects/firecrawl-manger`，容器 `fcam`）使用 `latest` 标签，存在“无感漂移”风险，且容器无 `healthcheck`（DEPLOYMENT.md 已登记该缺口）。
+
+**变更内容**
+- `docker-compose.yml`：默认镜像改为 `tag@digest` 形式 `sha-89d5d65@sha256:e2227a35…eb59c6`（tag 对应提交 89d5d65，digest 保证内容不可变）。
+- `docker-compose.yml`：为 `fcam` / `fcam_public` / `fcam_api`（8000）与 `fcam_admin`（8001）声明 `healthcheck`，用 YAML 锚点复用；探测 `/readyz`，`interval=30s`、`timeout=5s`、`retries=3`、`start_period=40s`。
+- `Dockerfile`：新增同名 `HEALTHCHECK`（默认 8000），供直接 `docker run`/容器云场景使用；compose 声明优先。
+- 文档：README 增加“健康检查”小节与固定镜像说明；`docs/docker.md` 增加 `tag@digest` 与 healthcheck 说明。
+
+**验证**
+- `docker compose config --quiet` 通过；`docker compose config` 确认 healthcheck 已解析到各服务。
+- 运行态验证与回滚记录见服务器项目 `DEPLOYMENT.md`。
+
+**待办**
+- 后续发版应同时打 `sha-<短提交>` tag，并在部署文档登记 digest，避免仅依赖版本号。
+
+---
+
 ## 2026-02-27（UTC）
 
 ### v0.1.8 版本发布

@@ -1,6 +1,23 @@
+# 健康检查统一口径：以 /readyz 为准（校验 admin token / master key / 数据库就绪）。
+# /healthz 只表示进程存活，不足以作为健康判据；两者语义见 docs/deploy-clawcloud.md。
+# 说明：镜像基于 python:3.11-slim，无 curl/wget，因此用 python 标准库探测。
+x-fcam-healthcheck-8000: &fcam-healthcheck-8000
+  test: ["CMD", "python", "-c", "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/readyz', timeout=4).status == 200 else 1)"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 40s
+
+x-fcam-healthcheck-8001: &fcam-healthcheck-8001
+  test: ["CMD", "python", "-c", "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8001/readyz', timeout=4).status == 200 else 1)"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 40s
+
 services:
   fcam:
-    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:latest}"
+    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:sha-89d5d65@sha256:e2227a350dbfd3330a9da48a57fad68a7f95bc72c4471fef3b34458be1eb59c6}"
     build: .
     ports:
       # 默认只绑定本机，避免在服务器上误把控制面暴露到公网；如需对外暴露可设 FCAM_BIND_ADDR=0.0.0.0
@@ -11,11 +28,12 @@ services:
       FCAM_CONFIG: "/app/config.yaml"
     volumes:
       - "./data:/app/data"
+    healthcheck: *fcam-healthcheck-8000
 
   # 对外暴露“数据面”端口；控制面（/admin/*）被禁用
   fcam_public:
     profiles: ["public"]
-    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:latest}"
+    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:sha-89d5d65@sha256:e2227a350dbfd3330a9da48a57fad68a7f95bc72c4471fef3b34458be1eb59c6}"
     build: .
     ports:
       - "0.0.0.0:8000:8000"
@@ -28,6 +46,7 @@ services:
       FCAM_SERVER__ENABLE_DOCS: "false"
     volumes:
       - "./data:/app/data"
+    healthcheck: *fcam-healthcheck-8000
 
   postgres:
     profiles: ["prod"]
@@ -56,7 +75,7 @@ services:
   # 生产示例：数据面（/api）对外暴露 8000；控制面禁用
   fcam_api:
     profiles: ["prod"]
-    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:latest}"
+    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:sha-89d5d65@sha256:e2227a350dbfd3330a9da48a57fad68a7f95bc72c4471fef3b34458be1eb59c6}"
     build: "."
     depends_on:
       postgres:
@@ -78,11 +97,12 @@ services:
       FCAM_STATE__REDIS__URL: "redis://redis:6379/0"
 
       FCAM_OBSERVABILITY__METRICS_ENABLED: "true"
+    healthcheck: *fcam-healthcheck-8000
 
   # 生产示例：控制面（/admin）仅绑定 127.0.0.1:8001；数据面禁用
   fcam_admin:
     profiles: ["prod"]
-    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:latest}"
+    image: "${FCAM_IMAGE:-guangshanshui/firecrawl-manager:sha-89d5d65@sha256:e2227a350dbfd3330a9da48a57fad68a7f95bc72c4471fef3b34458be1eb59c6}"
     build: "."
     depends_on:
       postgres:
@@ -105,6 +125,7 @@ services:
       FCAM_STATE__REDIS__URL: "redis://redis:6379/0"
 
       FCAM_OBSERVABILITY__METRICS_ENABLED: "true"
+    healthcheck: *fcam-healthcheck-8001
 
 volumes:
   pgdata:

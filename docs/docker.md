@@ -30,10 +30,28 @@
 - 固定发布 tag（推荐生产/容器云使用）：
   - `guangshanshui/firecrawl-manager:vX.Y.Z`
   - `guangshanshui/firecrawl-manager:vX.Y.Z-onebox`（UI+API 同端口，容器云更省心）
+  - `guangshanshui/firecrawl-manager:sha-<短提交>`（与代码提交一一对应，便于追溯）
 - 滚动 tag（仅开发/试用；语义与 `latest` 相同）：
   - `guangshanshui/firecrawl-manager:onebox`
 
+> 生产更稳的写法是 `tag@digest`，例如
+> `guangshanshui/firecrawl-manager:sha-89d5d65@sha256:e2227a350dbfd3330a9da48a57fad68a7f95bc72c4471fef3b34458be1eb59c6`
+> ——tag 表达版本语义，digest 保证内容不可变，`docker-compose.yml` 的默认镜像即采用该写法。
+
 > ClawCloud 推荐用 onebox 固定版本：例如 `guangshanshui/firecrawl-manager:v0.1.7-onebox`。
+
+---
+
+## 0.2 健康检查（healthcheck）
+
+镜像内置 `HEALTHCHECK`，`docker-compose.yml` 中各服务也显式声明（compose 优先），探测 `/readyz`：
+
+- `/healthz`：仅表示进程存活（liveness）
+- `/readyz`：admin token / master key / 数据库就绪（readiness），异常返回 `503` 与 `issues` 明细
+
+参数：`interval=30s`、`timeout=5s`、`retries=3`、`start_period=40s`（覆盖 `alembic upgrade head` + uvicorn 启动）。
+
+注意：`unhealthy` 不会触发 Docker 自动重启（`restart` 策略只响应进程退出），需配合外部监控。
 
 ---
 
@@ -79,8 +97,9 @@ docker compose up -d --no-build
 
 探活：
 ```bash
-curl -sS "http://127.0.0.1:8000/healthz"
-curl -sS "http://127.0.0.1:8000/readyz"
+curl -sS "http://127.0.0.1:8000/healthz"   # 存活
+curl -sS "http://127.0.0.1:8000/readyz"    # 就绪（healthcheck 用这个）
+docker compose ps                          # STATUS 列会显示 (healthy)/(unhealthy)
 ```
 
 数据持久化（SQLite 文件）：

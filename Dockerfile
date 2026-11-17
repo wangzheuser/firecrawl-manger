@@ -39,4 +39,10 @@ RUN mkdir -p "/app/data" && chown -R appuser:appuser "/app"
 USER root
 EXPOSE 8000
 
+# 健康检查以 /readyz 为准（校验 admin token / master key / 数据库就绪）；/healthz 仅表示进程存活。
+# 基础镜像为 python:3.11-slim，无 curl/wget，因此使用标准库探测。
+# 注意：docker-compose.yml 中各服务声明的 healthcheck 会覆盖此处默认值（控制面 8001 端口场景）。
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python -c "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/readyz', timeout=4).status == 200 else 1)"
+
 CMD ["/bin/sh", "/app/scripts/entrypoint.sh"]
