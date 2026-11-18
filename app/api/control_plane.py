@@ -548,14 +548,25 @@ def import_keys_text(
                             existing.client_id = client_id
                             changed = True
                         elif existing.client_id != client_id:
-                            failures.append(
-                                {
-                                    "line_no": item.line_no,
-                                    "raw": item.raw,
-                                    "message": "api key already bound to a different client",
-                                }
+                            # 仅当原 client 仍有效时才拒绝；原 client 已删除（或记录缺失）时，
+                            # 该 key 属于孤儿绑定，允许重新绑定到目标 client。
+                            current = (
+                                db.query(Client.status)
+                                .filter(Client.id == existing.client_id)
+                                .one_or_none()
                             )
-                            continue
+                            if current is None or current[0] == "deleted":
+                                existing.client_id = client_id
+                                changed = True
+                            else:
+                                failures.append(
+                                    {
+                                        "line_no": item.line_no,
+                                        "raw": item.raw,
+                                        "message": "api key already bound to a different client",
+                                    }
+                                )
+                                continue
 
                     if item.account_username and not existing.account_username:
                         existing.account_username = item.account_username
@@ -1298,7 +1309,15 @@ def delete_client(request: Request, client_id: int, db: Session = Depends(get_db
     client.is_active = False
     if client.status != "deleted":
         client.status = "deleted"
+
     try:
+        # 软删时解绑该 client 下的 key，避免留下指向已删除 client 的孤儿 key。
+        # 否则这些 key 既不会被任何有效 client 使用，重新导入时还会因
+        # "api key already bound to a different client" 而无法绑定到新 client。
+        db.query(ApiKey).filter(ApiKey.client_id == client.id).update(
+            {ApiKey.client_id: None},
+            synchronize_session=False,
+        )
         _audit(db, request=request, action="client.delete", resource_type="client", resource_id=str(client.id))
         db.commit()
     except Exception as exc:

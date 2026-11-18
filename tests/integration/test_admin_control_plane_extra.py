@@ -528,3 +528,98 @@ def test_admin_quota_stats_include_clients_and_audit_log_filters(tmp_path):
             },
         )
         assert raudit.status_code == 200
+
+
+def test_admin_delete_client_unbinds_its_keys(tmp_path):
+    """软删 client 时必须解绑其 key，避免留下指向已删除 client 的孤儿 key。"""
+    app = _make_app(tmp_path, db_name="delete_client_unbind.db", master_key="master")
+    SessionLocal = app.state.db_session_factory
+
+    with TestClient(app) as client:
+        c1 = _create_client(client, name="svc-unbind")
+        key_id = _create_key(client, api_key="fc-xxxxxxxxxxxxxxxx0001", name="k1", client_id=c1)
+
+        rdel = client.delete(f"/admin/clients/{c1}", headers=_admin_headers())
+        assert rdel.status_code == 204
+
+        db = SessionLocal()
+        try:
+            key = db.query(ApiKey).filter(ApiKey.id == key_id).one()
+            assert key.client_id is None
+        finally:
+            db.close()
+
+
+def test_admin_import_text_rebinds_keys_from_deleted_client(tmp_path):
+    """删除 client 后，用同一批 key 导入到新 client 应成功（绑定到新 client）。"""
+    app = _make_app(tmp_path, db_name="import_rebind_deleted.db", master_key="master")
+    SessionLocal = app.state.db_session_factory
+
+    with TestClient(app) as client:
+        old_client = _create_client(client, name="all")
+        key_id = _create_key(client, api_key="fc-xxxxxxxxxxxxxxxx0001", name="k1", client_id=old_client)
+
+        # 删除旧 client（软删）
+        assert client.delete(f"/admin/clients/{old_client}", headers=_admin_headers()).status_code == 204
+
+        new_client = _create_client(client, name="all-2")
+        rimport = client.post(
+            "/admin/keys/import-text",
+            headers=_admin_headers(),
+            json={"client_id": new_client, "text": "fc-xxxxxxxxxxxxxxxx0001"},
+        )
+        assert rimport.status_code == 200
+        body = rimport.json()
+        assert body["failed"] == 0
+        assert body["created"] == 0
+        assert body["updated"] == 1
+
+        db = SessionLocal()
+        try:
+            key = db.query(ApiKey).filter(ApiKey.id == key_id).one()
+            assert key.client_id == new_client
+        finally:
+            db.close()
+
+
+def test_admin_import_text_rebinds_key_whose_client_row_is_missing(tmp_path):
+    """原 client 记录已不存在（历史脏数据）时，导入也应能重新绑定。
+
+    说明：不真正删除 client 行来构造场景——SQLite 未启用 AUTOINCREMENT 时会复用被删行的 id，
+    新 client 可能拿到同一 id，从而走“同一 client”分支，测不到重绑定逻辑。
+    这里把 client 标记为 deleted（等价于已被删除的孤儿绑定），并直接改 key 指向一个不存在的 id。
+    """
+    app = _make_app(tmp_path, db_name="import_rebind_missing.db", master_key="master")
+    SessionLocal = app.state.db_session_factory
+
+    with TestClient(app) as client:
+        old_client = _create_client(client, name="legacy")
+        key_id = _create_key(client, api_key="fc-xxxxxxxxxxxxxxxx0001", name="k1", client_id=old_client)
+
+        # 模拟脏数据：key 指向一个不存在的 client id
+        db = SessionLocal()
+        try:
+            key = db.query(ApiKey).filter(ApiKey.id == key_id).one()
+            key.client_id = 999999
+            db.commit()
+        finally:
+            db.close()
+
+        new_client = _create_client(client, name="legacy-2")
+
+        rimport = client.post(
+            "/admin/keys/import-text",
+            headers=_admin_headers(),
+            json={"client_id": new_client, "text": "fc-xxxxxxxxxxxxxxxx0001"},
+        )
+        assert rimport.status_code == 200
+        body = rimport.json()
+        assert body["failed"] == 0
+        assert body["updated"] == 1
+
+        db = SessionLocal()
+        try:
+            key = db.query(ApiKey).filter(ApiKey.id == key_id).one()
+            assert key.client_id == new_client
+        finally:
+            db.close()

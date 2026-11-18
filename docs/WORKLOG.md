@@ -3,6 +3,34 @@
 > 目的：把"我做了什么/为什么这么做/验证结果/下一步"作为可追溯记录，避免语义与实现漂移。
 > 约束：不记录任何明文 token/api_key/Authorization；如需示例一律用占位符。
 
+## 2026-11-18（UTC）
+
+### 修复：删除 client 后同一批 key 无法重新导入
+
+**现象**
+- 删除 client（软删）后新建 client，再用同一批 key 导入，全部失败：
+  `api key already bound to a different client`，导入结果 `created=0/updated=0/skipped=0/failed=4`。
+
+**根因**
+1. `DELETE /admin/clients/{id}`（软删）只置 `status=deleted`，**未解绑其 key**，
+   key 的 `client_id` 仍指向已删除 client，形成孤儿 key；而 `purge` 分支本来就会置 `client_id=None`，
+   所以只有软删路径有该缺陷。
+2. `POST /admin/keys/import-text` 对已存在 key 只比较 `client_id` 是否相同，不区分
+   「原 client 仍有效」与「原 client 已删除」，一律拒绝重绑。
+
+**修复**
+- `delete_client`：软删时同步 `UPDATE api_keys SET client_id=NULL WHERE client_id=<id>`。
+- `import-text`：原 client 记录缺失或 `status='deleted'` 时视为孤儿绑定，允许重绑；
+  原 client 仍有效时保持原拒绝行为（不放松跨 client 抢占）。
+- 新增 3 个回归测试：删除解绑、重绑已删除 client、重绑缺失 client 记录。
+
+**验证**
+- 单元/集成：`tests/integration/test_admin_control_plane_extra.py` 相关用例全部通过。
+- 生产（us 服务器）实测：孤儿 key 导入由 failed 变为 `updated=1, failed=0`；
+  删除临时 client 后其 key 的 `client_id` 变为 NULL。
+
+---
+
 ## 2026-11-17（UTC）
 
 ### 可复现发布：固定镜像版本 + 补齐健康检查
