@@ -14,6 +14,8 @@ from app.api.exa_compat import router as exa_compat_router
 from app.api.firecrawl_compat import router as firecrawl_compat_router
 from app.api.firecrawl_v2_compat import router as firecrawl_v2_compat_router
 from app.api.health import router as health_router
+from app.api.searxng_compat import root_router as searxng_root_router
+from app.api.searxng_compat import router as searxng_compat_router
 from app.config import AppConfig, Secrets, load_config
 from app.core.concurrency import ConcurrencyManager, RedisConcurrencyManager
 from app.core.cooldown import NoopCooldownStore, RedisCooldownStore
@@ -159,6 +161,10 @@ def create_app(*, config: AppConfig | None = None, secrets: Secrets | None = Non
         app.include_router(firecrawl_v2_compat_router)
         if config.providers.exa.enabled:
             app.include_router(exa_compat_router)
+        if config.providers.searxng.enabled:
+            app.include_router(searxng_compat_router)
+            if config.providers.searxng.expose_root_search:
+                app.include_router(searxng_root_router)
     if config.server.enable_control_plane:
         app.include_router(control_plane_router)
         ui2_dir = Path(__file__).resolve().parent / "ui2"

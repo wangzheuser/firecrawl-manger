@@ -184,6 +184,22 @@ class ProviderConfig(BaseModel):
         return normalized.rstrip("/")
 
 
+class SearxngCompatConfig(BaseModel):
+    """SearXNG-compatible facade in front of the Firecrawl search API.
+
+    Disabled by default so existing deployments are unaffected.
+    """
+
+    enabled: bool = False
+    result_limit: int = 10
+    expose_root_search: bool = False
+
+    @field_validator("result_limit")
+    @classmethod
+    def _clamp_result_limit(cls, v: int) -> int:
+        return max(1, min(int(v), 50))
+
+
 class ProvidersConfig(BaseModel):
     exa: ProviderConfig = Field(default_factory=lambda: ProviderConfig(
         enabled=False,
@@ -194,6 +210,7 @@ class ProvidersConfig(BaseModel):
         route_prefix="/exa",
         allowed_paths=["search", "findSimilar", "contents", "answer"],
     ))
+    searxng: SearxngCompatConfig = Field(default_factory=SearxngCompatConfig)
 
 
 class AppConfig(BaseModel):

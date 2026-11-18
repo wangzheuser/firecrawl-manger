@@ -107,3 +107,9 @@ providers:
     max_retries: 3
     route_prefix: "/exa"
     allowed_paths: ["search", "findSimilar", "contents", "answer"]
+  # SearXNG 兼容门面：把 GET /searxng/search?q=&format=json 转成一次 Firecrawl
+  # search（复用 key 池、配额、限流与审计）。默认关闭，不影响既有部署。
+  searxng:
+    enabled: false
+    result_limit: 10
+    expose_root_search: false

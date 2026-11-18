@@ -40,6 +40,8 @@ def _infer_api_endpoint(path: str) -> str | None:
         prefix = "/v2/"
     elif path.startswith("/exa/"):
         prefix = "/exa/"
+    elif path.startswith("/searxng/"):
+        prefix = "/searxng/"
     else:
         return None
 
@@ -50,6 +52,11 @@ def _infer_api_endpoint(path: str) -> str | None:
     if prefix == "/exa/":
         first = suffix.split("/", 1)[0]
         endpoint = f"exa_{first[:32]}" if first else "unknown"
+        return endpoint or "unknown"
+
+    if prefix == "/searxng/":
+        first = suffix.split("/", 1)[0]
+        endpoint = f"searxng_{first[:32]}" if first else "unknown"
         return endpoint or "unknown"
 
     first, *rest = suffix.split("/", 1)
